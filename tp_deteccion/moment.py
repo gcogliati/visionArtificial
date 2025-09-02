@@ -1,7 +1,7 @@
 from math import copysign, log10
 import cv2
 
-
+#OJO MIRAR
 def get_hu_moments(contour):
     moments = cv2.moments(contour)
     hu_moments = cv2.HuMoments(moments)

@@ -1,9 +1,10 @@
 import cv2
 
+#permite modificar dinamicamente el threshold y kernel a mano desde un trackbar
 def create_trackbar(trackbar_name, window_name, slider_max):
     cv2.createTrackbar(trackbar_name, window_name, 1, slider_max, on_trackbar)
 
-def on_trackbar(val):
+def on_trackbar(val): #esta funcion no hace nada en si, yo paso el valor mas tarde en el codigo
     pass
 
 def get_trackbar_value(trackbar_name, window_name):
@@ -29,17 +30,19 @@ def main():
         _, frame = cap.read()
         cv2.imshow(WINDOW_NAME, frame)
         
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) #PASAR A MONOCROMATICA (escala de grises) (paso 1)
         # cv2.imshow('gray', gray)
 
         trackbar_thresh_value = get_trackbar_value(TRACKBAR_THRESH_NAME, WINDOW_NAME)
-        _, thresh = cv2.threshold(gray, trackbar_thresh_value, 255, cv2.THRESH_BINARY)
+        _, thresh = cv2.threshold(gray, trackbar_thresh_value, 255, cv2.THRESH_BINARY) #PASAR A IMAGEN BINARIA (blanco y negro) (paso 2)
         cv2.imshow('binary', thresh)
 
+        #LAS SIGUIENTES LINEAS APLICAN OPERACIONES MORFOLOGICAS
         kernel_size_value = get_trackbar_value(TRACKBAR_KERNEL_NAME, WINDOW_NAME)
+        #kernel_size_value = 11
         kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (kernel_size_value, kernel_size_value))
         
-        opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel) 
         # cv2.imshow('opening', opening)
 
         closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel)

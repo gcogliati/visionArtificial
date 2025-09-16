@@ -3,16 +3,16 @@ import csv
 
 import numpy as np
 
-from utils.label_converters import label_to_int
+from machine.utils.label_converters import label_to_int
 
 trainData = []
 trainLabels = []
 
 # Agarro las cosas en los archivos las guardo en variables y las mando a train data y labels
-def load_training_set():
+def load_training_set(csv_path):
     global trainData
     global trainLabels
-    with open('generated-files/shapes-hu-moments.csv') as csv_file:
+    with open(csv_path) as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in csv_reader:
             class_label = row.pop() # saca el ultimo elemento de la lista
@@ -28,11 +28,14 @@ def load_training_set():
 
 
 # llama la funcion de arriba, se manda a entrenar y devuelve el modelo entrenado
-def train_model():
-    load_training_set()
+def train_model(csv_path):
+    load_training_set(csv_path)
 
     tree = cv2.ml.DTrees_create()
     tree.setCVFolds(1)
     tree.setMaxDepth(10)
+    print("trainData shape:", trainData.shape)
+    print("trainLabels shape:", trainLabels.shape)
+
     tree.train(trainData, cv2.ml.ROW_SAMPLE, trainLabels)
     return tree

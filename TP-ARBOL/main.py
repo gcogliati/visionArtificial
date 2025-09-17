@@ -1,63 +1,125 @@
+import cv2
+import numpy as np
 import os
-from machine.utils.hu_moments_generation import generate_hu_moments_file
-from machine.utils.testing_model import load_and_test
-from machine.utils.training_model import train_model
 
-# 📂 Ruta base donde está este archivo (main.py)
+# Rutas a las imágenes de referencia
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+REF_DIR = os.path.join(BASE_DIR, "figures", "raw", "train")
+CLASSES = ['hearts', 'squares', 'stars']
 
-# 📂 Carpetas de datos
-TRAIN_DIR = os.path.join(BASE_DIR, "data", "raw", "train")
-TEST_DIR = os.path.join(BASE_DIR, "data", "raw", "test")
+# Variables globales para las barras deslizantes
+# Los valores iniciales son solo para la creación de las barras
+threshold_value = 150
+structuring_element_size = 5
+max_distance = 0.5
 
-# 📂 Carpeta donde se guardarán los archivos generados
-GENERATED_DIR = os.path.join(BASE_DIR, "generated-files")
-os.makedirs(GENERATED_DIR, exist_ok=True)
+# Diccionario para almacenar los contornos de referencia
+reference_contours = {}
 
-# 📄 Rutas a CSVs generados
-TRAIN_CSV = os.path.join(GENERATED_DIR, "train-hu-moments.csv")
-TEST_CSV = os.path.join(GENERATED_DIR, "test-hu-moments.csv")
+def load_reference_contours():
+    """Carga los contornos de las imágenes de referencia."""
+    for class_name in CLASSES:
+        class_path = os.path.join(REF_DIR, class_name)
+        image_files = [f for f in os.listdir(class_path) if f.endswith(('png', 'jpg', 'jpeg'))]
+        if image_files:
+            image_path = os.path.join(class_path, image_files[0])
+            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            if img is not None:
+                _, thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    reference_contours[class_name] = sorted(contours, key=cv2.contourArea, reverse=True)[0]
+    print("Contornos de referencia cargados:", reference_contours.keys())
 
-# 🤖 Modelos
-MODELS_DIR = os.path.join(BASE_DIR, "models")
-os.makedirs(MODELS_DIR, exist_ok=True)
-MODEL_PATH = os.path.join(MODELS_DIR, "decision_tree_hu.joblib")
-ENCODER_PATH = os.path.join(MODELS_DIR, "label_encoder.joblib")
+def on_trackbar(value):
+    """Función de callback para las barras deslizantes. No hace nada, ya que los valores se leen en el bucle principal."""
+    pass
 
-# 📊 Reportes
-FIG_DIR = os.path.join(BASE_DIR, "reports", "figures")
-os.makedirs(FIG_DIR, exist_ok=True)
-CONF_MAT_PATH = os.path.join(FIG_DIR, "confusion_matrix.png")
+def create_trackbars():
+    """Crea las barras deslizantes para ajustar los parámetros."""
+    cv2.namedWindow('Detector de Formas')
+    cv2.createTrackbar('Threshold', 'Detector de Formas', threshold_value, 255, on_trackbar)
+    cv2.createTrackbar('SE Size', 'Detector de Formas', structuring_element_size, 20, on_trackbar)
+    cv2.createTrackbar('Max Dist', 'Detector de Formas', int(max_distance * 100), 100, on_trackbar)
+
+def process_frame(frame, threshold_val, se_size_val, max_dist_val):
+    """Procesa un solo frame para detectar y clasificar figuras."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # Aplicar umbralización
+    _, thresh = cv2.threshold(gray, threshold_val, 255, cv2.THRESH_BINARY_INV)
+
+    # Operaciones morfológicas para eliminar ruido
+    kernel = np.ones((se_size_val, se_size_val), np.uint8)
+    processed_thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+    
+    # Encontrar todos los contornos
+    contours, _ = cv2.findContours(processed_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    result_frame = frame.copy()
+    
+    for contour in contours:
+        # Filtrar contornos pequeños
+        if cv2.contourArea(contour) < 100:
+            continue
+            
+        # Comparar contorno con las figuras de referencia
+        best_match = None
+        min_distance = float('inf')
+        
+        for class_name, ref_contour in reference_contours.items():
+            distance = cv2.matchShapes(contour, ref_contour, cv2.CONTOURS_MATCH_I1, 0.0)
+            
+            if distance < min_distance and distance < max_dist_val:
+                min_distance = distance
+                best_match = class_name
+        
+        # Anotar la imagen
+        if best_match:
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                
+                cv2.drawContours(result_frame, [contour], -1, (0, 255, 0), 2)
+                cv2.putText(result_frame, best_match, (cX - 20, cY - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    
+    return result_frame
 
 def main():
-    print("==> 1) Generando CSV de Momentos de Hu (TRAIN)")
-    generate_hu_moments_file(output_csv=TRAIN_CSV, input_dir=TRAIN_DIR)
+    load_reference_contours()
+    create_trackbars()
+    
+    cap = cv2.VideoCapture(0)
 
-    print("==> 2) Generando CSV de Momentos de Hu (TEST)")
-    generate_hu_moments_file(output_csv=TEST_CSV, input_dir=TEST_DIR)
+    if not cap.isOpened():
+        print("Error: No se pudo abrir la cámara.")
+        return
 
-    print("==> 3) Entrenando modelo (árbol de decisión)")
-    model, encoder = train_model(
-        features_csv_path=TRAIN_CSV,
-        model_path=MODEL_PATH,
-        encoder_path=ENCODER_PATH,
-        cv_folds=5
-    )
+    print("Presiona 'q' para salir.")
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    print("==> 4) Evaluando en TEST y guardando matriz de confusión")
-    load_and_test(
-        model_path=MODEL_PATH,
-        encoder_path=ENCODER_PATH,
-        test_csv=TEST_CSV,
-        fig_path=CONF_MAT_PATH
-    )
+        # Lee los valores de las barras en cada iteración del bucle
+        threshold_val = cv2.getTrackbarPos('Threshold', 'Detector de Formas')
+        se_size_val = cv2.getTrackbarPos('SE Size', 'Detector de Formas')
+        max_dist_val = cv2.getTrackbarPos('Max Dist', 'Detector de Formas') / 100.0
 
-    print("\n✅ Listo. ¡Pipeline completo ejecutado!")
-    print(f"Modelo:        {MODEL_PATH}")
-    print(f"LabelEncoder:  {ENCODER_PATH}")
-    print(f"Confusion:     {CONF_MAT_PATH}")
-    print(f"Train CSV:     {TRAIN_CSV}")
-    print(f"Test  CSV:     {TEST_CSV}")
+        # Asegura que el tamaño del elemento estructural sea al menos 1
+        se_size_val = max(1, se_size_val)
+
+        annotated_frame = process_frame(frame, threshold_val, se_size_val, max_dist_val)
+        
+        cv2.imshow('Detector de Formas', annotated_frame)
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
